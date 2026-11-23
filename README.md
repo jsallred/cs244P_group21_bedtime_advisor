@@ -50,12 +50,19 @@ Power: 5 V USB wall adapter. Wi-Fi must be **2.4 GHz** (an iPhone hotspot needs 
 
 ## Setup
 
-1. **Firmware credentials:** copy `include/secrets.h.example` to `include/secrets.h` and fill in your Wi-Fi, EMQX host, username and password.
+1. **Firmware credentials:** copy `include/secrets.h.example` to `include/secrets.h` and fill in your Wi-Fi, EMQX DNS hostname, username and password. Replace `MQTT_CA_CERT` with the complete trusted CA PEM downloaded from your EMQX deployment console. The placeholder cannot establish a TLS connection.
 2. **EMQX:** create a free Serverless deployment (set Spend Limit to 0), and add an authentication user under Access Control.
 3. **Cloud:** follow `cloud/SETUP-CLOUD.md` to create the D1 database, Worker, and EMQX rule.
 4. **Flash:** open the folder in PlatformIO (VS Code), then Upload and open the Serial Monitor at 115200.
-   Expected: `BMP280 OK`, `WiFi connected`, `MQTT connected`, then `pub temp ... -> ok`.
+   Expected: `BMP280 OK`, then after Wi-Fi and NTP synchronization, `MQTT connected` and `pub temp ... -> ok`.
 5. **Dashboard:** open `https://bedtime-advisor.<your-subdomain>.workers.dev/?key=<VIEW_KEY>`.
+
+**Upgrading an existing checkout:** Git does not update your ignored
+`include/secrets.h`. Keep your existing credentials and manually add the
+`MQTT_CA_CERT` declaration from `include/secrets.h.example`, replacing its
+placeholder with your deployment's trusted CA PEM. Otherwise compilation fails
+with `MQTT_CA_CERT was not declared`. Do not overwrite your credentials by
+copying the whole example over an existing file.
 
 ## Configuration (top of `src/main.cpp`)
 
@@ -74,7 +81,19 @@ Shows current temperature, target, AC advice, minutes until 9 PM, a 6/24/72 h ch
 
 - No credentials are stored in the repository; `secrets.h` is ignored and the cloud keys live only in Cloudflare and EMQX.
 - MQTT uses a username and password over TLS. The Worker accepts writes only with a secret bearer key, and the dashboard needs a view key.
-- Known shortcut: the ESP32 currently skips broker certificate validation (`setInsecure()`). Load the EMQX CA certificate with `setCACert()` for the final build.
+- The ESP32 verifies the broker certificate chain using `MQTT_CA_CERT` and validates the DNS hostname in `MQTT_HOST`. MQTT attempts wait for an NTP synchronization callback after boot and a clock sanity check (Unix time > 1700000000). NTP is not authenticated.
+- Maintain the trusted CA when the deployment certificate chain changes. Never fall back to disabling verification on connection errors.
+
+### Local TLS validation
+
+Run `pio run` to compile after configuring `include/secrets.h`. Compilation alone does not verify TLS behavior. On an ESP32, check:
+
+1. Correct CA, broker DNS hostname, and synchronized time: MQTT connects and publishes.
+2. An unrelated CA: TLS fails and MQTT stays disconnected.
+3. A hostname absent from the server certificate (using a controlled test broker): TLS fails before MQTT authentication.
+4. After a cold boot with NTP blocked: MQTT stays disconnected while sensing, LEDs, and display continue; restoring NTP allows a connection.
+
+Use a controlled broker and disposable credentials for negative tests. NTP synchronization is required once per boot; it does not establish authenticated time or guarantee continued freshness.
 
 ## Known limitations
 

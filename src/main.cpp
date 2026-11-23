@@ -11,6 +11,8 @@
 #include <Adafruit_BMP280.h>
 #include <Adafruit_SSD1306.h>
 #include <time.h>
+#include <atomic>
+#include <esp_sntp.h>
 #include "secrets.h"
 
 // ---------------- Pins ----------------
@@ -59,6 +61,9 @@ int minutesLeft = -1;       // -1 = holding mode / time unknown
 float predictedF = NAN;
 uint32_t seqNum = 0;
 unsigned long tSense = 0, tPublish = 0, tMqttTry = 0, tHeartbeat = 0;
+std::atomic<bool> ntpSynced{false};
+
+void onTimeSync(struct timeval*) { ntpSynced.store(true); }
 
 String topic(const char* leaf) { return String("iot/") + DEVICE_ID + "/" + leaf; }
 
@@ -162,6 +167,9 @@ void publishStatus(const char* s) {
 
 void ensureMqtt() {
   if (WiFi.status() != WL_CONNECTED || mqtt.connected()) return;
+  // Certificate validity dates must be checked against a usable clock.
+  // Keep sensing/advising locally while NTP is unavailable.
+  if (!ntpSynced.load() || !timeSynced()) return;
   if (millis() - tMqttTry < 5000 && tMqttTry != 0) return;
   tMqttTry = millis();
   Serial.println("MQTT connecting...");
@@ -245,11 +253,12 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  sntp_set_time_sync_notification_cb(onTimeSync);
   configTzTime(TZ_INFO, "pool.ntp.org", "time.nist.gov");
 
-  // Demo shortcut: skip certificate validation. For the final build, load HiveMQ's
-  // root CA (ISRG Root X1) with tlsClient.setCACert(...) instead.
-  tlsClient.setInsecure();
+  // Use the CA supplied by this EMQX deployment. Connecting by DNS hostname
+  // lets WiFiClientSecure verify both the certificate chain and broker name.
+  tlsClient.setCACert(MQTT_CA_CERT);
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setKeepAlive(30);
   mqtt.setBufferSize(512);
