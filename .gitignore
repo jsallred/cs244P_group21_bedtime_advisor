@@ -1,0 +1,13 @@
+.pio/
+.vscode/
+.DS_Store
+
+# Real credentials - never commit. Use include/secrets.h.example as the template.
+include/secrets.h
+
+# Cloudflare / Node tooling (not used for the dashboard, but just in case)
+.wrangler/
+.dev.vars
+node_modules/
+*.env
+.env
